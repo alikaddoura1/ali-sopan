@@ -1,9 +1,6 @@
 [latroi, longroi] = regionOfInterest(32.234884, -110.953670,100);
-display(latroi)
-display(longroi)
 
 [latGrid, longGrid] = getGrid(32.234884, -110.953670,100, 8);
-
 
 filename = "map (4).osm";
 
@@ -11,21 +8,8 @@ buildings = readgeotable(filename,Layer="buildingparts");
 
 basemapName = "osm";
 
-figure
-geobasemap(basemapName)
-geoplot(buildings,FaceColor="#808080",FaceAlpha=1)
-geotickformat dd
-
-
 latROI = latroi;
 lonROI = longroi;
-
-latROI(end+1) = latROI(1);
-lonROI(end+1) = lonROI(1);
-ROI = geopolyshape(latROI,lonROI);
-
-hold on
-geoplot(ROI,FaceColor="m",FaceAlpha=0.2,EdgeColor="m",LineWidth=2)
 
 [latmin,latmax] = bounds(latROI);
 [lonmin,lonmax] = bounds(lonROI);
@@ -36,16 +20,12 @@ clipped = geoclip(shape,[latmin latmax],[lonmin,lonmax]);
 idxInsideROI = clipped.NumRegions > 0;
 buildingsROI = buildings(idxInsideROI,:);
 
-figure
-geobasemap(basemapName)
-geoplot(buildingsROI,FaceColor="#808080",FaceAlpha=1)
 
 viewer = siteviewer(Buildings=buildingsROI,Basemap=basemapName);
 
 
 % Iterate through each point
 for i = 1:numel(latGrid)
-
 
     point = geopointshape(latGrid(i),longGrid(i));
    
@@ -60,72 +40,113 @@ for i = 1:numel(latGrid)
     end
 end
 
-% Display the result grid
-disp(latGrid);
-disp(longGrid);
 
-% 
-% interactivelySelectBuildings = false;
-% if interactivelySelectBuildings
-%     [latGlass,lonGlass] = ginput(1); 
-%     [latBrick,lonBrick] = ginput(1); 
-%     [latMetal,lonMetal] = ginput(1); 
-% else
-%     latGlass = 32.23723;
-%     lonGlass = -110.95423;
-%     latBrick = 32.23326;
-%     lonBrick = -110.954333;
-%     latMetal = 32.23329;
-%     lonMetal = -110.954333;
-% end
-% 
-% pointGlass = geopointshape(latGlass,lonGlass);
-% pointBrick = geopointshape(latBrick,lonBrick);
-% pointMetal = geopointshape(latMetal,lonMetal);
+% Iterate through each point
+for i = 1:numel(latGrid)
+
+    point = geopointshape(latGrid(i),longGrid(i));
+
+    % building check if building exist remove that point
+    for j = 1:size(buildingsROI) 
+        building = buildingsROI.Shape(j);
+        if isinterior(building, point)
+            latGrid(i) = NaN;
+            longGrid(i) = NaN;
+            break;
+        end
+    end
+end
 
 
-% for row = 1:height(buildingsROI)
-%     bldg = buildingsROI.Shape(row); 
-%     if isinterior(bldg,pointGlass)
-%         buildingsROI.Material(row) = "glass";
-%         buildingsROI.Color(row) = "#35707E";
-%     elseif isinterior(bldg,pointMetal)
-%         buildingsROI.Material(row) = "metal";
-%         buildingsROI.Color(row) = "#151513";
-%     elseif isinterior(bldg,pointBrick)
-%     buildingsROI.Material(row) = "brick";
-%     buildingsROI.Color(row) = "#AA4A44";
-%     else 
-%         buildingsROI.Material(row) = "concrete";
-%         buildingsROI.Color(row) = "#808080";
-%     end
-% end
-
-
-
-% Find indices where latGrid and longGrid are not NaN
+% remove the nans
 validPoints = ~isnan(latGrid) & ~isnan(longGrid);
 
 latGrid = latGrid(validPoints);
 longGrid = longGrid(validPoints);
 
-% Create txsite 
-tx = txsite(Latitude=latGrid, Longitude=longGrid);
 
-% rx = rxsite(Latitude=latGrid,Longitude=-110.953647);
-
-% pm = propagationModel("raytracing",MaxNumReflections=3);
+% Propagation model and signal strength calculation
+% pm = propagationModel("raytracing");
+% sSD = phased.ShortDipoleAntennaElement;
+% sURA = phased.URA('Element',sSD,'Size',[16 16]);
 % 
-% rxLatitudes = 32.234935:0.0005:32.235761;
-% rxLongitutes = -110.953690:0.0005:-110.952899;
+% % tx and rx site
+% tx = txsite(Latitude=latGrid(6), Longitude=longGrid(6), TransmitterFrequency=28e9, Antenna=sURA, AntennaAngle=90);
+% rxs = rxsite(Latitude=latGrid, Longitude=longGrid);
+% raytrace(tx,rxs, pm);
+
+fc = 28e9;
+ueAntSize = [2 2];                      % number of rows and columns in rectangular array (UE).
+ueArrayOrientation = [-90 0].';         % azimuth (0 deg is East, 90 deg is North) and elevation (positive points upwards)  in deg
+reflectionsOrder = 2;                   % number of reflections for ray tracing analysis (0 for LOS)
+c = physconst('LightSpeed');
+lambda = c/fc;
+
+tx = txsite("Name","100 GHz BS", ...
+    "CoordinateSystem","geographic",...
+    "Latitude",latGrid(4), ...
+    "Longitude",longGrid(4), ...
+    "AntennaHeight",5, ...
+    "TransmitterPower",5, ...
+    "TransmitterFrequency",fc);
+show(tx)
+
+tx.Antenna = arrayDesign(fc,8,8);
+tx.AntennaAngle = 0;
+
+% Configuring propagation model
+pm = propagationModel("raytracing", ...
+    "Method","sbr", ...
+    "CoordinateSystem","geographic",...
+    "MaxNumReflections",1, ...
+    "BuildingsMaterial","perfect-reflector", ...
+    "TerrainMaterial","perfect-reflector",...
+    "AngularSeparation","low",...
+    "MaxRelativePathLoss", Inf);
+
+rxs = rxsite("CoordinateSystem","geographic",...
+        "Latitude",latGrid,...
+        "Longitude",longGrid, ...
+        "AntennaHeight",1.5,...
+        "AntennaAngle",ueArrayOrientation,...
+        "Antenna",arrayDesign(fc,2,2));
+
+% coverage(tx,pm, ...
+%     SignalStrengths=-120:-5, ...
+%     MaxRange=250, ...
+%     Resolution=3, ...
+%     Transparency=0.6)
+
+
+setBSsteeringVector(fc,-90,tx);
+
+
+ss = sigstrength(rxs,tx,pm);
+
+ss(ss == -Inf) = NaN;
+
 % 
-% rays = raytrace(tx,rx,pm);
-% rays= rays{1};
-
-show(tx);
-% show(rx);
-% plot(rays);
+% resolution
+resolution = 100;
 
 
+% Grid for image pixels
+[latGridImage, lonGridImage] = meshgrid(linspace(latmin, latmax, resolution), ...
+                                        linspace(lonmin, lonmax, resolution));
+% matc sigstrength to grid point
+ssGrid = griddata(latGrid, longGrid, ss, latGridImage, lonGridImage);
+
+ssGrid = rot90(ssGrid);
+
+figure;
+imagesc( ssGrid);
+colorbar;
+
+
+function setBSsteeringVector(fc,az,txSite)
+    steeringVector = phased.SteeringVector("SensorArray",txSite.Antenna);
+    sv = steeringVector(fc,[az;0]);
+    txSite.Antenna.Taper = conj(sv);
+end
 
 
