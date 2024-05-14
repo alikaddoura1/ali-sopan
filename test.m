@@ -1,12 +1,13 @@
 [latroi, longroi] = regionOfInterest(32.234884, -110.953670,100);
 
-[latGrid, longGrid] = getGrid(32.234884, -110.953670,100, 8);
+[latGrid, longGrid] = getGrid(32.234884, -110.953670,100, 64);
 
 filename = "map (4).osm";
 
 buildings = readgeotable(filename,Layer="buildingparts");
 
-basemapName = "osm";
+% basemapName = "osm";
+basemapName = "openstreetmap";
 
 latROI = latroi;
 lonROI = longroi;
@@ -21,7 +22,7 @@ idxInsideROI = clipped.NumRegions > 0;
 buildingsROI = buildings(idxInsideROI,:);
 
 
-viewer = siteviewer(Buildings=buildingsROI,Basemap=basemapName);
+viewer = siteviewer("Buildings", buildingsROI,"Basemap",basemapName);
 
 
 % Iterate through each point
@@ -82,17 +83,17 @@ reflectionsOrder = 2;                   % number of reflections for ray tracing 
 c = physconst('LightSpeed');
 lambda = c/fc;
 
-tx = txsite("Name","100 GHz BS", ...
-    "CoordinateSystem","geographic",...
-    "Latitude",latGrid(4), ...
-    "Longitude",longGrid(4), ...
-    "AntennaHeight",5, ...
-    "TransmitterPower",5, ...
-    "TransmitterFrequency",fc);
-show(tx)
+% tx = txsite("Name","100 GHz BS", ...
+%     "CoordinateSystem","geographic",...
+%     "Latitude",latGrid(i), ...
+%     "Longitude",longGrid(i), ...
+%     "AntennaHeight",5, ...
+%     "TransmitterPower",5, ...
+%     "TransmitterFrequency",fc);
+% show(tx)
 
-tx.Antenna = arrayDesign(fc,8,8);
-tx.AntennaAngle = 0;
+% tx.Antenna = arrayDesign(fc,8,8);
+
 
 % Configuring propagation model
 pm = propagationModel("raytracing", ...
@@ -108,8 +109,8 @@ rxs = rxsite("CoordinateSystem","geographic",...
         "Latitude",latGrid,...
         "Longitude",longGrid, ...
         "AntennaHeight",1.5,...
-        "AntennaAngle",ueArrayOrientation,...
-        "Antenna",arrayDesign(fc,2,2));
+        "AntennaAngle",ueArrayOrientation);
+        % "Antenna",arrayDesign(fc,2,2));
 
 % coverage(tx,pm, ...
 %     SignalStrengths=-120:-5, ...
@@ -118,35 +119,51 @@ rxs = rxsite("CoordinateSystem","geographic",...
 %     Transparency=0.6)
 
 
-setBSsteeringVector(fc,-90,tx);
+% setBSsteeringVector(fc,-90,tx);
+folderPath = 'data';
 
+for i = 1: numel(longGrid)
+    tx = txsite("Name","100 GHz BS", ...
+    "CoordinateSystem","geographic",...
+    "Latitude",latGrid(i), ...
+    "Longitude",longGrid(i), ...
+    "AntennaHeight",5, ...
+    "TransmitterPower",5, ...
+    "TransmitterFrequency",fc);
 
-ss = sigstrength(rxs,tx,pm);
+     ss = sigstrength(rxs,tx,pm);
 
-ss(ss == -Inf) = NaN;
+    ss(ss == -Inf) = NaN;
+    
+    % 
+    % resolution
+    resolution = 100;
+    
+    
+    % Grid for image pixels
+    [latGridImage, lonGridImage] = meshgrid(linspace(latmin, latmax, resolution), ...
+                                            linspace(lonmin, lonmax, resolution));
+    % matc sigstrength to grid point
+    ssGrid = griddata(latGrid, longGrid, ss, latGridImage, lonGridImage);
+    
+    ssGrid = rot90(ssGrid);
+    
+    figure;
+    imagesc( ssGrid);
+    colorbar;
+    hold on;
+    
+    show(tx)
 
-% 
-% resolution
-resolution = 100;
-
-
-% Grid for image pixels
-[latGridImage, lonGridImage] = meshgrid(linspace(latmin, latmax, resolution), ...
-                                        linspace(lonmin, lonmax, resolution));
-% matc sigstrength to grid point
-ssGrid = griddata(latGrid, longGrid, ss, latGridImage, lonGridImage);
-
-ssGrid = rot90(ssGrid);
-
-figure;
-imagesc( ssGrid);
-colorbar;
-
-
-function setBSsteeringVector(fc,az,txSite)
-    steeringVector = phased.SteeringVector("SensorArray",txSite.Antenna);
-    sv = steeringVector(fc,[az;0]);
-    txSite.Antenna.Taper = conj(sv);
+    filename = fullfile(folderPath, sprintf('SignalStrength_Image_%d.png', i));
+    saveas(gcf, filename);
+    close(gcf);
 end
 
+
+% function setBSsteeringVector(fc,az,txSite)
+%     steeringVector = phased.SteeringVector("SensorArray",txSite.Antenna);
+%     sv = steeringVector(fc,[az;0]);
+%     txSite.Antenna.Taper = conj(sv);
+% end
 
